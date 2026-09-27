@@ -1,0 +1,232 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tic Tac Toe</title>
+<link rel="icon" href="icon.svg">
+<style>
+  :root {
+    --bg: #f4f5f9; --card: #fff; --text: #1b1d29; --muted: #6b7086; --line: #e3e5ee;
+    --accent: #6d5dfc; --x: #6d5dfc; --o: #f2557a; --win: #ffd166;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1117; --card: #181b24; --text: #eceef5; --muted: #8b90a5; --line: #262a36;
+      --accent: #8b7dff; --x: #8b7dff; --o: #ff6b8f; --win: #5c4a12;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .card {
+    width: 100%; max-width: 380px; background: var(--card); border-radius: 20px;
+    padding: 32px 28px; box-shadow: 0 10px 40px rgb(0 0 0 / .08); text-align: center;
+  }
+  [hidden] { display: none !important; }
+  .logo { width: 64px; height: 64px; }
+  h1 { margin: 12px 0 4px; font-size: 1.6rem; }
+  .muted { color: var(--muted); font-size: .9rem; margin: 0; }
+  .btn {
+    width: 100%; margin-top: 20px; padding: 14px; border: 0; border-radius: 12px;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+    display: inline-flex; justify-content: center; align-items: center; gap: 8px;
+    transition: transform .1s, opacity .2s;
+  }
+  .btn:hover { opacity: .9; }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .6; cursor: wait; }
+  .btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); margin-top: 10px; }
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid rgb(255 255 255 / .4); border-top-color: #fff;
+    border-radius: 50%; animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .msg { min-height: 1.5em; margin-top: 14px; color: var(--o); font-size: .9rem; }
+  .top { display: flex; justify-content: space-between; align-items: center; font-size: .85rem; color: var(--muted); }
+  .pill { background: var(--bg); padding: 4px 10px; border-radius: 999px; font-family: ui-monospace, monospace; }
+  .score { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 20px 0; }
+  .score div { background: var(--bg); border-radius: 12px; padding: 8px; }
+  .score b { display: block; font-size: 1.4rem; }
+  .score span { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  #board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #board button {
+    aspect-ratio: 1; border: 0; border-radius: 14px; background: var(--bg);
+    font: 700 2.4rem system-ui, sans-serif; cursor: pointer; transition: background .15s, transform .1s;
+  }
+  #board button:not(:disabled):hover { background: var(--line); }
+  #board button:disabled { cursor: default; }
+  #board .X { color: var(--x); }
+  #board .O { color: var(--o); }
+  #board .win { background: var(--win); }
+  .powered {
+    position: fixed; left: 16px; bottom: 16px; font-size: .8rem; color: var(--muted); text-decoration: none;
+  }
+  .powered:hover { color: var(--accent); }
+  .status { margin: 18px 0 0; font-weight: 600; min-height: 1.5em; }
+</style>
+
+<main class="card">
+  <section id="login">
+    <img class="logo" src="icon.svg" alt="">
+    <h1>Tic Tac Toe</h1>
+    <p class="muted">Connect a wallet holding a valid license to play.</p>
+    <p class="msg" id="msg"></p>
+    <button class="btn" id="check">Connect wallet</button>
+  </section>
+
+  <section id="game" hidden>
+    <div class="top">
+      <span class="pill" id="addr"></span>
+      <span id="expiry"></span>
+    </div>
+    <div class="score">
+      <div><b id="s-you">0</b><span>You</span></div>
+      <div><b id="s-draw">0</b><span>Draws</span></div>
+      <div><b id="s-bot">0</b><span>Bot</span></div>
+    </div>
+    <div id="board"></div>
+    <p class="status" id="status"></p>
+    <button class="btn" id="again" hidden>Play again</button>
+    <button class="btn ghost" id="disconnect">Disconnect</button>
+  </section>
+</main>
+<a class="powered" href="https://horkos-app.github.io/">Powered by Horkos</a>
+
+<script type="module">
+  import { Connection, PublicKey } from 'https://esm.sh/@solana/web3.js@1.98.0'
+
+  const PROGRAM_ID = new PublicKey('AsGTHWf1Cix3TuD2uk4xEewv4MetpSR1W6coCBA2TG6K')
+  const LICENSE_TYPE = new PublicKey('3fxB2fZbesmFDp223PCRUoyGHuyc3JHrR8bjCTNk2KHx')
+  const connection = new Connection('https://api.devnet.solana.com')
+  const $ = id => document.getElementById(id)
+
+  function getWallet() {
+    return window.phantom?.solana ?? window.solana
+  }
+
+  async function connectWallet() {
+    const wallet = getWallet()
+    if (!wallet) throw new Error('No Solana wallet found')
+    const { publicKey } = await wallet.connect()
+    return publicKey
+  }
+
+  function licenseAddress(owner) {
+    const seeds = [new TextEncoder().encode('license'), LICENSE_TYPE.toBytes(), owner.toBytes()]
+    return PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0]
+  }
+
+  async function readExpiry(license) {
+    const account = await connection.getAccountInfo(license)
+    if (!account || !account.owner.equals(PROGRAM_ID)) return null
+    const data = new DataView(account.data.buffer, account.data.byteOffset)
+    return Number(data.getBigInt64(96, true))
+  }
+
+  const LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
+  const score = { X: 0, O: 0, draw: 0 }
+  let cells, busy
+
+  function winner(b) {
+    for (const line of LINES) {
+      const [a, c, d] = line
+      if (b[a] && b[a] === b[c] && b[a] === b[d]) return { who: b[a], line }
+    }
+    return b.every(Boolean) ? { who: 'draw', line: [] } : null
+  }
+
+  function minimax(b, player) {
+    const w = winner(b)
+    if (w) return { score: w.who === 'O' ? 1 : w.who === 'X' ? -1 : 0 }
+    let best = { score: player === 'O' ? -2 : 2 }
+    b.forEach((v, i) => {
+      if (v) return
+      b[i] = player
+      const { score } = minimax(b, player === 'O' ? 'X' : 'O')
+      b[i] = null
+      if (player === 'O' ? score > best.score : score < best.score) best = { score, move: i }
+    })
+    return best
+  }
+
+  function draw(result) {
+    $('board').replaceChildren(...cells.map((v, i) => {
+      const cell = document.createElement('button')
+      cell.textContent = v ?? ''
+      cell.className = [v, result?.line.includes(i) && 'win'].filter(Boolean).join(' ')
+      cell.disabled = !!v || !!result || busy
+      cell.setAttribute('aria-label', v ?? `Cell ${i + 1}`)
+      cell.onclick = () => play(i)
+      return cell
+    }))
+    $('status').textContent = !result ? (busy ? 'Bot thinking…' : 'Your turn')
+      : result.who === 'draw' ? "It's a draw" : result.who === 'X' ? 'You win!' : 'Bot wins'
+    $('again').hidden = !result
+  }
+
+  function finish(result) {
+    if (result) {
+      score[result.who]++
+      $('s-you').textContent = score.X
+      $('s-bot').textContent = score.O
+      $('s-draw').textContent = score.draw
+    }
+    draw(result)
+  }
+
+  function play(i) {
+    cells[i] = 'X'
+    const result = winner(cells)
+    if (result) return finish(result)
+    busy = true
+    draw(null)
+    setTimeout(() => {
+      cells[minimax(cells, 'O').move] = 'O'
+      busy = false
+      finish(winner(cells))
+    }, 400)
+  }
+
+  function newGame() {
+    cells = Array(9).fill(null)
+    busy = false
+    draw(null)
+  }
+
+  function showGame(owner, expiresAt) {
+    const a = owner.toBase58()
+    $('addr').textContent = `${a.slice(0, 4)}…${a.slice(-4)}`
+    $('expiry').textContent = `Licensed until ${new Date(expiresAt * 1000).toLocaleDateString()}`
+    $('login').hidden = true
+    $('game').hidden = false
+    newGame()
+  }
+
+  $('check').onclick = async () => {
+    const btn = $('check')
+    btn.disabled = true
+    btn.innerHTML = '<span class="spinner"></span>Checking license…'
+    $('msg').textContent = ''
+    try {
+      const owner = await connectWallet()
+      const expiresAt = await readExpiry(licenseAddress(owner))
+      if (expiresAt === null) $('msg').textContent = 'This wallet has no license.'
+      else if (expiresAt <= Date.now() / 1000) $('msg').textContent = `License expired on ${new Date(expiresAt * 1000).toLocaleDateString()}.`
+      else showGame(owner, expiresAt)
+    } catch (e) {
+      $('msg').textContent = e.message
+    }
+    btn.disabled = false
+    btn.textContent = 'Connect wallet'
+  }
+
+  $('again').onclick = newGame
+
+  $('disconnect').onclick = async () => {
+    await getWallet()?.disconnect?.()
+    $('game').hidden = true
+    $('login').hidden = false
+  }
+</script>
